@@ -1,5 +1,12 @@
 import { storage } from '../storage';
 
+type TokenData = {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  userId: string;
+};
+
 const GRAPH_API_URL = 'https://graph.microsoft.com/v1.0';
 const GRAPH_SUBSCRIBE_URL = 'https://graph.microsoft.com/v1.0/subscriptions';
 
@@ -23,12 +30,15 @@ async function getAuthHeader(userId: string = 'default'): Promise<string> {
   if (Date.now() >= token.expiresAt - 5 * 60 * 1000) {
     console.log('[Graph] Token near expiry, refreshing...');
     token = await refreshAccessToken(userId);
+    if (!token) {
+      throw new Error('No access token available after refresh');
+    }
   }
 
   return `Bearer ${token.accessToken}`;
 }
 
-async function refreshAccessToken(userId: string = 'default'): Promise<any> {
+async function refreshAccessToken(userId: string = 'default'): Promise<TokenData | null> {
   const refreshToken = storage.getRefreshToken(userId);
   if (!refreshToken) {
     throw new Error('No refresh token available');
