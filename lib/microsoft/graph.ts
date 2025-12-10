@@ -12,10 +12,10 @@ const GRAPH_SUBSCRIBE_URL = 'https://graph.microsoft.com/v1.0/subscriptions';
 
 const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID;
 const MICROSOFT_CLIENT_SECRET = process.env.MICROSOFT_CLIENT_SECRET;
-const MICROSOFT_TENANT_ID = process.env.MICROSOFT_TENANT_ID;
+const MICROSOFT_TENANT_ID = process.env.MICROSOFT_TENANT_ID || 'common';
 const MICROSOFT_REDIRECT_URI = process.env.MICROSOFT_REDIRECT_URI;
 
-if (!MICROSOFT_CLIENT_ID || !MICROSOFT_CLIENT_SECRET || !MICROSOFT_TENANT_ID) {
+if (!MICROSOFT_CLIENT_ID || !MICROSOFT_CLIENT_SECRET) {
   throw new Error('Missing Microsoft Graph environment variables');
 }
 
@@ -55,7 +55,7 @@ async function refreshAccessToken(userId: string = 'default'): Promise<TokenData
           client_secret: MICROSOFT_CLIENT_SECRET!,
           refresh_token: refreshToken,
           grant_type: 'refresh_token',
-          scope: 'Calendars.ReadWrite Contacts.ReadWrite Mail.ReadWrite User.Read',
+          scope: 'Calendars.ReadWrite Contacts.ReadWrite Mail.Read Mail.Send User.Read offline_access',
         }).toString(),
       }
     );
