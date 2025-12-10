@@ -37,7 +37,7 @@ async function readSubscriptions(): Promise<Record<string, SubscriptionData>> {
 }
 
 async function writeSubscriptions(subs: Record<string, SubscriptionData>) {
-  await put(SUBSCRIPTION_KEY, JSON.stringify(subs), { access: 'private' });
+  await put(SUBSCRIPTION_KEY, JSON.stringify(subs), { access: 'public' });
 }
 
 export const storage = {
@@ -45,7 +45,7 @@ export const storage = {
   async saveToken(userId: string, accessToken: string, refreshToken: string, expiresInSeconds: number) {
     const expiresAt = Date.now() + expiresInSeconds * 1000;
     const tokenData: TokenData = { accessToken, refreshToken, expiresAt, userId };
-    await put(`${TOKEN_PREFIX}${userId}`, JSON.stringify(tokenData), { access: 'private' });
+    await put(`${TOKEN_PREFIX}${userId}`, JSON.stringify(tokenData), { access: 'public' });
     console.log(`[Storage] Token saved for user ${userId}, expires at ${new Date(expiresAt).toISOString()}`);
   },
 
