@@ -1,4 +1,4 @@
-import { del, get, put } from '@vercel/blob';
+import { del, head, put } from '@vercel/blob';
 
 type TokenData = {
   accessToken: string;
@@ -17,19 +17,23 @@ type SubscriptionData = {
 const TOKEN_PREFIX = 'token:';
 const SUBSCRIPTION_KEY = 'subscriptions.json';
 
-async function readSubscriptions(): Promise<Record<string, SubscriptionData>> {
+async function readBlobJson<T>(key: string): Promise<T | null> {
   try {
-    const blob = await get(SUBSCRIPTION_KEY);
-    if (!blob) return {};
-    const data = await blob.json();
-    return (data as Record<string, SubscriptionData>) || {};
+    const info = await head(key);
+    if (!info?.downloadUrl) return null;
+    const res = await fetch(info.downloadUrl);
+    if (!res.ok) return null;
+    return (await res.json()) as T;
   } catch (error: any) {
-    if (error?.status === 404) {
-      return {};
-    }
-    console.error('[Storage] Error reading subscriptions:', error);
-    return {};
+    if (error?.status === 404) return null;
+    console.error('[Storage] Error reading blob:', error);
+    return null;
   }
+}
+
+async function readSubscriptions(): Promise<Record<string, SubscriptionData>> {
+  const data = await readBlobJson<Record<string, SubscriptionData>>(SUBSCRIPTION_KEY);
+  return data || {};
 }
 
 async function writeSubscriptions(subs: Record<string, SubscriptionData>) {
@@ -46,21 +50,13 @@ export const storage = {
   },
 
   async getToken(userId: string): Promise<TokenData | null> {
-    try {
-      const blob = await get(`${TOKEN_PREFIX}${userId}`);
-      if (!blob) return null;
-      const data = await blob.json();
-      const token = data as TokenData;
-      if (Date.now() >= token.expiresAt) {
-        console.log(`[Storage] Token expired for user ${userId}`);
-        return null;
-      }
-      return token;
-    } catch (error: any) {
-      if (error?.status === 404) return null;
-      console.error('[Storage] Error retrieving token:', error);
+    const token = await readBlobJson<TokenData>(`${TOKEN_PREFIX}${userId}`);
+    if (!token) return null;
+    if (Date.now() >= token.expiresAt) {
+      console.log(`[Storage] Token expired for user ${userId}`);
       return null;
     }
+    return token;
   },
 
   async getRefreshToken(userId: string): Promise<string | null> {
