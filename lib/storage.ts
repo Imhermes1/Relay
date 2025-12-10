@@ -1,4 +1,4 @@
-import { del, head, put } from '@vercel/blob';
+import { put } from '@vercel/blob';
 
 type TokenData = {
   accessToken: string;
@@ -14,83 +14,90 @@ type SubscriptionData = {
   createdAt: number;
 };
 
-const TOKEN_PREFIX = 'token:';
-const SUBSCRIPTION_KEY = 'subscriptions.json';
+const TOKEN_PREFIX = 'tokens/';
+const SUBSCRIPTION_INDEX = 'subscriptions/index.json';
+const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
+const BASE_URL = BLOB_TOKEN ? `https://blob.vercel-storage.com/${BLOB_TOKEN}/` : null;
 
-async function readBlobJson<T>(key: string): Promise<T | null> {
+async function fetchBlobJson<T>(key: string): Promise<T | null> {
+  if (!BASE_URL) {
+    console.warn('[Storage] BLOB_READ_WRITE_TOKEN not configured');
+    return null;
+  }
   try {
-    const info = await head(key);
-    if (!info?.downloadUrl) return null;
-    const res = await fetch(info.downloadUrl);
-    if (!res.ok) return null;
+    const res = await fetch(`${BASE_URL}${key}`);
+    if (!res.ok) {
+      return null;
+    }
     return (await res.json()) as T;
-  } catch (error: any) {
-    if (error?.status === 404) return null;
-    console.error('[Storage] Error reading blob:', error);
+  } catch (error) {
+    console.error('[Storage] Error fetching blob json:', error);
     return null;
   }
 }
 
+async function writeBlob(key: string, data: unknown) {
+  await put(key, JSON.stringify(data), {
+    access: 'public',
+    addRandomSuffix: false,
+  });
+}
+
 async function readSubscriptions(): Promise<Record<string, SubscriptionData>> {
-  const data = await readBlobJson<Record<string, SubscriptionData>>(SUBSCRIPTION_KEY);
+  const data = await fetchBlobJson<Record<string, SubscriptionData>>(SUBSCRIPTION_INDEX);
   return data || {};
 }
 
-async function writeSubscriptions(subs: Record<string, SubscriptionData>) {
-  await put(SUBSCRIPTION_KEY, JSON.stringify(subs), { access: 'public' });
-}
-
 export const storage = {
-  // Token Management
-  async saveToken(userId: string, accessToken: string, refreshToken: string, expiresInSeconds: number) {
-    const expiresAt = Date.now() + expiresInSeconds * 1000;
-    const tokenData: TokenData = { accessToken, refreshToken, expiresAt, userId };
-    await put(`${TOKEN_PREFIX}${userId}`, JSON.stringify(tokenData), { access: 'public' });
-    console.log(`[Storage] Token saved for user ${userId}, expires at ${new Date(expiresAt).toISOString()}`);
-  },
-
-  async getToken(userId: string): Promise<TokenData | null> {
-    const token = await readBlobJson<TokenData>(`${TOKEN_PREFIX}${userId}`);
-    if (!token) return null;
-    if (Date.now() >= token.expiresAt) {
-      console.log(`[Storage] Token expired for user ${userId}`);
+  async getToken(userId: string = 'default'): Promise<TokenData | null> {
+    const key = `${TOKEN_PREFIX}${userId}.json`;
+    const token = await fetchBlobJson<TokenData>(key);
+    if (!token) {
+      console.log(`[Storage] No token found for ${userId}`);
       return null;
     }
+    console.log(`[Storage] Token retrieved for ${userId}`);
     return token;
   },
 
-  async getRefreshToken(userId: string): Promise<string | null> {
+  async saveToken(userId: string, accessToken: string, refreshToken: string, expiresIn: number): Promise<void> {
+    const expiresAt = Date.now() + expiresIn * 1000;
+    const tokenData: TokenData = {
+      accessToken,
+      refreshToken,
+      expiresAt,
+      userId,
+    };
+
+    const key = `${TOKEN_PREFIX}${userId}.json`;
+    const blob = await put(key, JSON.stringify(tokenData), {
+      access: 'public',
+      addRandomSuffix: false,
+    });
+
+    console.log(`[Storage] Token saved for ${userId} at ${blob.url}`);
+  },
+
+  async updateAccessToken(userId: string, accessToken: string, expiresIn: number): Promise<void> {
+    const existing = await this.getToken(userId);
+    if (!existing) {
+      throw new Error('No existing token to update');
+    }
+
+    await this.saveToken(userId, accessToken, existing.refreshToken, expiresIn);
+  },
+
+  async getRefreshToken(userId: string = 'default'): Promise<string | null> {
     const token = await this.getToken(userId);
     return token?.refreshToken || null;
   },
 
-  async updateAccessToken(userId: string, newAccessToken: string, expiresInSeconds: number) {
-    const token = await this.getToken(userId);
-    if (!token) {
-      throw new Error('No existing token to update');
-    }
-    await this.saveToken(userId, newAccessToken, token.refreshToken, expiresInSeconds);
-    console.log(`[Storage] Access token refreshed for user ${userId}`);
+  async clearToken(userId: string = 'default'): Promise<void> {
+    console.log(`[Storage] Token clear requested for ${userId}`);
+    // Deletion not implemented; would require signed URLs or management API.
   },
 
-  async clearToken(userId: string) {
-    try {
-      await del(`${TOKEN_PREFIX}${userId}`);
-      console.log(`[Storage] Token cleared for user ${userId}`);
-    } catch (error) {
-      console.error('[Storage] Error clearing token:', error);
-    }
-  },
-
-  getTokenStats: async () => {
-    // Blob storage doesn't support listing by prefix without additional metadata.
-    return {
-      totalTokens: 'unknown',
-      validTokens: 'unknown',
-    };
-  },
-
-  // Subscription Management
+  // Subscription helpers (stored in a single index file)
   async saveSubscription(subscriptionId: string, resource: string, expiresAt: number) {
     const subs = await readSubscriptions();
     subs[subscriptionId] = {
@@ -99,8 +106,8 @@ export const storage = {
       expiresAt,
       createdAt: Date.now(),
     };
-    await writeSubscriptions(subs);
-    console.log(`[Storage] Subscription saved: ${subscriptionId} for resource ${resource}, expires at ${new Date(expiresAt).toISOString()}`);
+    await writeBlob(SUBSCRIPTION_INDEX, subs);
+    console.log(`[Storage] Subscription saved: ${subscriptionId}`);
   },
 
   async getSubscription(subscriptionId: string): Promise<SubscriptionData | null> {
@@ -124,15 +131,15 @@ export const storage = {
     const sub = subs[subscriptionId];
     if (!sub) return;
     sub.expiresAt = expiresAt;
-    await writeSubscriptions(subs);
-    console.log(`[Storage] Subscription renewed: ${subscriptionId}, new expiry: ${new Date(expiresAt).toISOString()}`);
+    await writeBlob(SUBSCRIPTION_INDEX, subs);
+    console.log(`[Storage] Subscription renewed: ${subscriptionId}`);
   },
 
   async deleteSubscription(subscriptionId: string) {
     const subs = await readSubscriptions();
     if (subs[subscriptionId]) {
       delete subs[subscriptionId];
-      await writeSubscriptions(subs);
+      await writeBlob(SUBSCRIPTION_INDEX, subs);
       console.log(`[Storage] Subscription deleted: ${subscriptionId}`);
     }
   },
