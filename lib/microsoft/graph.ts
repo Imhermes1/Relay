@@ -51,8 +51,8 @@ async function refreshAccessToken(userId: string = 'default'): Promise<TokenData
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
-          client_id: MICROSOFT_CLIENT_ID,
-          client_secret: MICROSOFT_CLIENT_SECRET,
+          client_id: MICROSOFT_CLIENT_ID!,
+          client_secret: MICROSOFT_CLIENT_SECRET!,
           refresh_token: refreshToken,
           grant_type: 'refresh_token',
           scope: 'Calendars.ReadWrite Contacts.ReadWrite Mail.ReadWrite User.Read',
