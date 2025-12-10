@@ -8,6 +8,22 @@ import {
   getContacts,
 } from '@/lib/microsoft/graph';
 
+function formatEventsForSMS(events: any[]): string {
+  if (events.length === 0) return 'No events found.';
+
+  return events
+    .map((event) => {
+      const start = new Date(event.start?.dateTime);
+      const time = start.toLocaleTimeString('en-AU', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+      return `${time} - ${event.subject}`;
+    })
+    .join('\n');
+}
+
 const systemPrompt = `You are a helpful personal assistant with access to the user's Microsoft calendar, email, and contacts.
 
 CRITICAL RULES:
@@ -92,10 +108,7 @@ async function processMessage(from: string, incomingMessage: string) {
           switch (toolCall.function.name) {
             case 'get_calendar_events': {
               const events = await getCalendarEvents(args.daysAhead || args.days_ahead || 7);
-              toolResult =
-                events.length > 0
-                  ? JSON.stringify(events)
-                  : 'No events found for this time period';
+              toolResult = events.length > 0 ? formatEventsForSMS(events) : 'No events found.';
               break;
             }
 

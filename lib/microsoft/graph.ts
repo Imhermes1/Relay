@@ -87,7 +87,10 @@ export async function getCalendarEvents(
     const response = await fetch(
       `${GRAPH_API_URL}/me/calendarview?startDateTime=${now.toISOString()}&endDateTime=${future.toISOString()}`,
       {
-        headers: { Authorization: authHeader },
+        headers: {
+          Authorization: authHeader,
+          Prefer: 'outlook.timezone="AUS Eastern Standard Time"', // Melbourne time
+        },
       }
     );
 
@@ -117,11 +120,11 @@ export async function createCalendarEvent(
       subject: title,
       start: {
         dateTime: startTime,
-        timeZone: 'UTC',
+        timeZone: 'AUS Eastern Standard Time', // Melbourne time
       },
       end: {
         dateTime: endTime,
-        timeZone: 'UTC',
+        timeZone: 'AUS Eastern Standard Time', // Melbourne time
       },
       body: {
         contentType: 'HTML',
