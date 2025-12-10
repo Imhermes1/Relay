@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
     const subscriptions = await getSubscriptions();
 
     // Also check local storage for subscriptions needing renewal
-    const expiredSubs = storage.getExpiredSubscriptions();
+    const expiredSubs = await storage.getExpiredSubscriptions();
     const renewalNeeded = expiredSubs.filter((sub) => {
       const expiresIn = sub.expiresAt - Date.now();
       return expiresIn < 60 * 60 * 1000; // Less than 1 hour to expiry
@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
  */
 export async function PATCH(request: NextRequest) {
   try {
-    const expiredSubs = storage.getExpiredSubscriptions();
+    const expiredSubs = await storage.getExpiredSubscriptions();
     const renewed = [];
 
     for (const sub of expiredSubs) {

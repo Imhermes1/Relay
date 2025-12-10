@@ -1,109 +1,143 @@
-// In-memory token storage
-// ⚠️ For production, use a database (PostgreSQL, MongoDB) or Redis
+import { del, get, put } from '@vercel/blob';
 
-interface TokenData {
+type TokenData = {
   accessToken: string;
   refreshToken: string;
   expiresAt: number;
   userId: string;
-}
+};
 
-interface SubscriptionData {
+type SubscriptionData = {
   subscriptionId: string;
   resource: string;
   expiresAt: number;
   createdAt: number;
+};
+
+const TOKEN_PREFIX = 'token:';
+const SUBSCRIPTION_KEY = 'subscriptions.json';
+
+async function readSubscriptions(): Promise<Record<string, SubscriptionData>> {
+  try {
+    const blob = await get(SUBSCRIPTION_KEY);
+    if (!blob) return {};
+    const data = await blob.json();
+    return (data as Record<string, SubscriptionData>) || {};
+  } catch (error: any) {
+    if (error?.status === 404) {
+      return {};
+    }
+    console.error('[Storage] Error reading subscriptions:', error);
+    return {};
+  }
 }
 
-class InMemoryStorage {
-  private tokens: Map<string, TokenData> = new Map();
-  private subscriptions: Map<string, SubscriptionData> = new Map();
+async function writeSubscriptions(subs: Record<string, SubscriptionData>) {
+  await put(SUBSCRIPTION_KEY, JSON.stringify(subs), { access: 'private' });
+}
 
+export const storage = {
   // Token Management
-  saveToken(userId: string, accessToken: string, refreshToken: string, expiresInSeconds: number) {
+  async saveToken(userId: string, accessToken: string, refreshToken: string, expiresInSeconds: number) {
     const expiresAt = Date.now() + expiresInSeconds * 1000;
-    this.tokens.set(userId, { accessToken, refreshToken, expiresAt, userId });
+    const tokenData: TokenData = { accessToken, refreshToken, expiresAt, userId };
+    await put(`${TOKEN_PREFIX}${userId}`, JSON.stringify(tokenData), { access: 'private' });
     console.log(`[Storage] Token saved for user ${userId}, expires at ${new Date(expiresAt).toISOString()}`);
-  }
+  },
 
-  getToken(userId: string): TokenData | null {
-    const token = this.tokens.get(userId);
-    if (!token) return null;
-
-    // Check if token is expired
-    if (Date.now() >= token.expiresAt) {
-      console.log(`[Storage] Token expired for user ${userId}`);
+  async getToken(userId: string): Promise<TokenData | null> {
+    try {
+      const blob = await get(`${TOKEN_PREFIX}${userId}`);
+      if (!blob) return null;
+      const data = await blob.json();
+      const token = data as TokenData;
+      if (Date.now() >= token.expiresAt) {
+        console.log(`[Storage] Token expired for user ${userId}`);
+        return null;
+      }
+      return token;
+    } catch (error: any) {
+      if (error?.status === 404) return null;
+      console.error('[Storage] Error retrieving token:', error);
       return null;
     }
+  },
 
-    return token;
-  }
-
-  getRefreshToken(userId: string): string | null {
-    const token = this.tokens.get(userId);
+  async getRefreshToken(userId: string): Promise<string | null> {
+    const token = await this.getToken(userId);
     return token?.refreshToken || null;
-  }
+  },
 
-  updateAccessToken(userId: string, newAccessToken: string, expiresInSeconds: number) {
-    const token = this.tokens.get(userId);
-    if (token) {
-      token.accessToken = newAccessToken;
-      token.expiresAt = Date.now() + expiresInSeconds * 1000;
-      console.log(`[Storage] Access token refreshed for user ${userId}`);
+  async updateAccessToken(userId: string, newAccessToken: string, expiresInSeconds: number) {
+    const token = await this.getToken(userId);
+    if (!token) {
+      throw new Error('No existing token to update');
     }
-  }
+    await this.saveToken(userId, newAccessToken, token.refreshToken, expiresInSeconds);
+    console.log(`[Storage] Access token refreshed for user ${userId}`);
+  },
 
-  clearToken(userId: string) {
-    this.tokens.delete(userId);
-    console.log(`[Storage] Token cleared for user ${userId}`);
-  }
+  async clearToken(userId: string) {
+    try {
+      await del(`${TOKEN_PREFIX}${userId}`);
+      console.log(`[Storage] Token cleared for user ${userId}`);
+    } catch (error) {
+      console.error('[Storage] Error clearing token:', error);
+    }
+  },
+
+  getTokenStats: async () => {
+    // Blob storage doesn't support listing by prefix without additional metadata.
+    return {
+      totalTokens: 'unknown',
+      validTokens: 'unknown',
+    };
+  },
 
   // Subscription Management
-  saveSubscription(subscriptionId: string, resource: string, expiresAt: number) {
-    this.subscriptions.set(subscriptionId, {
+  async saveSubscription(subscriptionId: string, resource: string, expiresAt: number) {
+    const subs = await readSubscriptions();
+    subs[subscriptionId] = {
       subscriptionId,
       resource,
       expiresAt,
       createdAt: Date.now(),
-    });
-    console.log(`[Storage] Subscription saved: ${subscriptionId} for resource ${resource}, expires at ${new Date(expiresAt).toISOString()}`);
-  }
-
-  getSubscription(subscriptionId: string): SubscriptionData | null {
-    return this.subscriptions.get(subscriptionId) || null;
-  }
-
-  getAllSubscriptions(): SubscriptionData[] {
-    return Array.from(this.subscriptions.values());
-  }
-
-  getExpiredSubscriptions(): SubscriptionData[] {
-    const now = Date.now();
-    return Array.from(this.subscriptions.values()).filter(
-      (sub) => sub.expiresAt - now < 60 * 60 * 1000 // Expires within 1 hour
-    );
-  }
-
-  updateSubscription(subscriptionId: string, expiresAt: number) {
-    const sub = this.subscriptions.get(subscriptionId);
-    if (sub) {
-      sub.expiresAt = expiresAt;
-      console.log(`[Storage] Subscription renewed: ${subscriptionId}, new expiry: ${new Date(expiresAt).toISOString()}`);
-    }
-  }
-
-  deleteSubscription(subscriptionId: string) {
-    this.subscriptions.delete(subscriptionId);
-    console.log(`[Storage] Subscription deleted: ${subscriptionId}`);
-  }
-
-  getTokenStats() {
-    return {
-      totalTokens: this.tokens.size,
-      validTokens: Array.from(this.tokens.values()).filter((t) => Date.now() < t.expiresAt).length,
     };
-  }
-}
+    await writeSubscriptions(subs);
+    console.log(`[Storage] Subscription saved: ${subscriptionId} for resource ${resource}, expires at ${new Date(expiresAt).toISOString()}`);
+  },
 
-// Singleton instance
-export const storage = new InMemoryStorage();
+  async getSubscription(subscriptionId: string): Promise<SubscriptionData | null> {
+    const subs = await readSubscriptions();
+    return subs[subscriptionId] || null;
+  },
+
+  async getAllSubscriptions(): Promise<SubscriptionData[]> {
+    const subs = await readSubscriptions();
+    return Object.values(subs);
+  },
+
+  async getExpiredSubscriptions(): Promise<SubscriptionData[]> {
+    const subs = await readSubscriptions();
+    const now = Date.now();
+    return Object.values(subs).filter((sub) => sub.expiresAt - now < 60 * 60 * 1000);
+  },
+
+  async updateSubscription(subscriptionId: string, expiresAt: number) {
+    const subs = await readSubscriptions();
+    const sub = subs[subscriptionId];
+    if (!sub) return;
+    sub.expiresAt = expiresAt;
+    await writeSubscriptions(subs);
+    console.log(`[Storage] Subscription renewed: ${subscriptionId}, new expiry: ${new Date(expiresAt).toISOString()}`);
+  },
+
+  async deleteSubscription(subscriptionId: string) {
+    const subs = await readSubscriptions();
+    if (subs[subscriptionId]) {
+      delete subs[subscriptionId];
+      await writeSubscriptions(subs);
+      console.log(`[Storage] Subscription deleted: ${subscriptionId}`);
+    }
+  },
+};
