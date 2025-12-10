@@ -61,8 +61,3 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-
-// Export tokens for use in other routes
-export function getTokens() {
-  return { accessToken, refreshToken };
-}
