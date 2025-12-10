@@ -10,29 +10,46 @@ import {
 
 export async function POST(request: NextRequest) {
   try {
-    // Get the raw body for Twilio validation
-    const body = await request.text();
-    const params = new URLSearchParams(body);
-    const bodyObj = Object.fromEntries(params);
+    const formData = await request.formData();
+    const body = Object.fromEntries(formData.entries()) as Record<string, string>;
+
+    const from = body.From || '';
+    const message = body.Body || '';
+    const twilioSignature = request.headers.get('x-twilio-signature') || '';
+    const requestUrl =
+      process.env.NEXT_PUBLIC_APP_URL?.endsWith('/api/sms')
+        ? process.env.NEXT_PUBLIC_APP_URL
+        : process.env.NEXT_PUBLIC_APP_URL
+        ? `${process.env.NEXT_PUBLIC_APP_URL}/api/sms`
+        : request.url;
 
     // Validate Twilio request
-    const signature = request.headers.get('X-Twilio-Signature') || '';
-    const url = `${process.env.NEXT_PUBLIC_APP_URL}/api/sms`;
-    
-    const isValid = validateTwilioRequest(bodyObj, url, signature);
-    if (!isValid) {
-      console.error('[SMS] Invalid Twilio request signature');
-      return new NextResponse('Unauthorized', { status: 403 });
+    const isValid = validateTwilioRequest(body, requestUrl, twilioSignature);
+    console.log(`[Twilio] Request validation: ${isValid}`);
+
+    if (!isValid && process.env.NODE_ENV === 'production') {
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 403 });
     }
 
-    // Extract message details
-    const incomingMessage = bodyObj.Body || '';
-    const fromNumber = bodyObj.From || '';
-    const messageId = bodyObj.MessageSid || '';
+    console.log(`[SMS] Incoming message from ${from}: "${message}"`);
 
-    console.log(`[SMS] Incoming message from ${fromNumber}: "${incomingMessage}"`);
+    // Respond to Twilio immediately
+    const response = NextResponse.json({ success: true }, { status: 200 });
 
-    // Initial AI call with system prompt
+    // Process asynchronously
+    processMessage(from, message).catch((err) => {
+      console.error('[SMS] Error processing message:', err);
+    });
+
+    return response;
+  } catch (error: any) {
+    console.error('[SMS] Error handling webhook:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+async function processMessage(from: string, incomingMessage: string) {
+  try {
     const systemPrompt = extractSystemPrompt();
     const messages = [
       {
@@ -134,40 +151,20 @@ export async function POST(request: NextRequest) {
 
     // Send response via SMS
     await sendSms({
-      to: fromNumber,
+      to: from,
       body: smsResponse,
     });
 
-    console.log(`[SMS] Response sent to ${fromNumber}`);
-
-    // Return TwiML response (required by Twilio)
-    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Message>${finalResponse.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</Message>
-</Response>`;
-
-    return new NextResponse(twiml, {
-      headers: { 'Content-Type': 'application/xml' },
-    });
+    console.log(`[SMS] Response sent to ${from}`);
   } catch (error) {
-    console.error('[SMS] Error processing message:', error);
-
-    // Try to send error message
+    console.error('[SMS] Error in processMessage:', error);
     try {
-      const bodyParams = await request.text();
-      const params = new URLSearchParams(bodyParams);
-      const fromNumber = params.get('From');
-
-      if (fromNumber) {
-        await sendSms({
-          to: fromNumber,
-          body: 'Sorry, an error occurred processing your message. Please try again.',
-        });
-      }
+      await sendSms({
+        to: from,
+        body: 'Sorry, an error occurred processing your message. Please try again.',
+      });
     } catch (smsError) {
       console.error('[SMS] Error sending error message:', smsError);
     }
-
-    return new NextResponse('Error', { status: 500 });
   }
 }
