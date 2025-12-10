@@ -36,6 +36,12 @@ export function validateTwilioRequest(
   requestUrl: string,
   twilioSignature: string
 ): boolean {
+  // Extra guard to keep TypeScript happy in this scope
+  if (!authToken) {
+    console.error('[Twilio] Auth token not available for validation');
+    return false;
+  }
+
   try {
     const isValid = twilio.validateRequest(
       authToken,
