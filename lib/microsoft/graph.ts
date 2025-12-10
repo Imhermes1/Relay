@@ -20,7 +20,7 @@ if (!MICROSOFT_CLIENT_ID || !MICROSOFT_CLIENT_SECRET) {
 }
 
 async function getAuthHeader(userId: string = 'default'): Promise<string> {
-  let token = storage.getToken(userId);
+  let token = await storage.getToken(userId);
 
   if (!token) {
     throw new Error('No access token available. User needs to authenticate.');
@@ -39,7 +39,7 @@ async function getAuthHeader(userId: string = 'default'): Promise<string> {
 }
 
 async function refreshAccessToken(userId: string = 'default'): Promise<TokenData | null> {
-  const refreshToken = storage.getRefreshToken(userId);
+  const refreshToken = await storage.getRefreshToken(userId);
   if (!refreshToken) {
     throw new Error('No refresh token available');
   }
@@ -65,12 +65,12 @@ async function refreshAccessToken(userId: string = 'default'): Promise<TokenData
     }
 
     const data = await response.json();
-    storage.updateAccessToken(userId, data.access_token, data.expires_in);
+    await storage.updateAccessToken(userId, data.access_token, data.expires_in);
 
-    return storage.getToken(userId);
+    return await storage.getToken(userId);
   } catch (error) {
     console.error('[Graph] Error refreshing token:', error);
-    storage.clearToken(userId);
+    await storage.clearToken(userId);
     throw new Error('Failed to refresh access token');
   }
 }
@@ -260,7 +260,7 @@ export async function createSubscription(
     console.log('[Graph] Subscription created:', data.id);
 
     // Store subscription for renewal tracking
-    storage.saveSubscription(data.id, resource, expirationTime.getTime());
+    await storage.saveSubscription(data.id, resource, expirationTime.getTime());
 
     return data;
   } catch (error) {
@@ -296,7 +296,7 @@ export async function renewSubscription(
     console.log('[Graph] Subscription renewed:', subscriptionId);
 
     // Update storage
-    storage.updateSubscription(subscriptionId, expirationTime.getTime());
+    await storage.updateSubscription(subscriptionId, expirationTime.getTime());
 
     return data;
   } catch (error) {
