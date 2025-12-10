@@ -1,12 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sendSms, validateTwilioRequest } from '@/lib/twilio/client';
-import { callOpenRouter, extractSystemPrompt, parseToolCalls } from '@/lib/openrouter/client';
+import { callOpenRouter, parseToolCalls } from '@/lib/openrouter/client';
 import {
   getCalendarEvents,
   createCalendarEvent,
   sendEmail,
   getContacts,
 } from '@/lib/microsoft/graph';
+
+const systemPrompt = `You are a helpful personal assistant with access to the user's Microsoft calendar, email, and contacts.
+
+CRITICAL RULES:
+- When using tools, ONLY report information that was actually returned by the tool
+- If a tool returns an empty array or no results, say "I don't see any [events/emails/etc]"
+- NEVER invent or assume information that wasn't explicitly in the tool response
+- If you're unsure, ask the user for clarification
+- Be precise with times, dates, and details - only state facts from the data
+
+Available tools:
+- get_calendar_events: Retrieve calendar events
+- create_calendar_event: Create new calendar events  
+- send_email: Send emails
+- get_contacts: Get contact information
+
+Always be concise in your responses since this is SMS.`;
 
 export async function POST(request: NextRequest) {
   try {
@@ -50,7 +67,6 @@ export async function POST(request: NextRequest) {
 
 async function processMessage(from: string, incomingMessage: string) {
   try {
-    const systemPrompt = extractSystemPrompt();
     const messages = [
       {
         role: 'user' as const,
@@ -75,15 +91,11 @@ async function processMessage(from: string, incomingMessage: string) {
 
           switch (toolCall.function.name) {
             case 'get_calendar_events': {
-              const events = await getCalendarEvents(args.days_ahead || 7);
-              if (events.length === 0) {
-                toolResult = 'No upcoming events found.';
-              } else {
-                toolResult = events
-                  .slice(0, 3)
-                  .map((e) => `${e.subject} at ${new Date(e.start.dateTime).toLocaleTimeString()}`)
-                  .join('; ');
-              }
+              const events = await getCalendarEvents(args.daysAhead || args.days_ahead || 7);
+              toolResult =
+                events.length > 0
+                  ? JSON.stringify(events)
+                  : 'No events found for this time period';
               break;
             }
 
